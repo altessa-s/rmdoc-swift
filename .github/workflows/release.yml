@@ -1,0 +1,150 @@
+# A tag becomes a release: the xcframework built, zipped, checksummed and
+# attached, with the lines a consumer has to paste written out beside it.
+#
+# The checksum is the reason this is a workflow and not a note in the README.
+# A remote binary target resolves by `url` **and** `checksum`, and a checksum
+# worked out by hand on somebody's laptop is a checksum of whatever was on
+# that laptop. Here it is computed from the very bytes that are uploaded, in
+# the same step, so the two cannot drift.
+#
+# The tag is the version. `project.yml` carries 1.0.0 so that a local build
+# needs no ceremony, and this overrides it — a framework in a 1.2.0 release
+# that calls itself 1.0.0 is a discrepancy nothing would report.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+# Least privilege, named rather than inherited: this job writes a release and
+# reads the tree, and has no business doing anything else.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Use the newest Xcode on the runner
+        run: Scripts/ci-select-xcode.sh
+
+      # A tag is not a promise that the tree is sound. The refusals run before
+      # anything is published, because a release is the one artefact nobody
+      # re-checks: it is linked, not read.
+      - name: Test
+        run: swift test
+
+      # The tag reaches the shell through the environment and never through
+      # `${{ }}` inside a `run:` block. A tag name is chosen by whoever pushes
+      # it, and interpolating one straight into a script is how a repository
+      # runs somebody else's shell.
+      - name: Read the version out of the tag
+        id: version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # A hyphen is what separates a pre-release in semver: 1.1.0-beta.2.
+          case "$version" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "releasing $version from tag $TAG"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # The script's own checks refuse a static framework and one missing a
+      # slice — both failures that otherwise surface only in the consumer, and
+      # in a release that means after it has been linked.
+      - name: Build the xcframework
+        env:
+          RMDOC_VERSION: ${{ steps.version.outputs.version }}
+          RMDOC_BUILD: ${{ github.run_number }}
+        run: Scripts/build-xcframework.sh
+
+      # `ditto` and not `zip`: an `.xcframework` is a bundle, and `ditto`
+      # preserves the symlinks and the extended attributes a macOS framework is
+      # made of. A plain `zip` unpacks into something Xcode declines.
+      - name: Package and checksum
+        id: package
+        run: |
+          ditto -c -k --keepParent build/RMDoc.xcframework RMDoc.xcframework.zip
+          checksum="$(swift package compute-checksum RMDoc.xcframework.zip)"
+          echo "checksum=$checksum" >> "$GITHUB_OUTPUT"
+          echo "sha256 $checksum"
+          ls -lh RMDoc.xcframework.zip
+
+      - name: Write the notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          {
+            echo "## RMDoc $VERSION"
+            echo
+            echo "Packing and unpacking the reMarkable \`.rmdoc\` container."
+            echo
+            echo "### As a source dependency"
+            echo
+            echo '```swift'
+            echo "dependencies: ["
+            echo "    .package(url: \"$SERVER/$REPO.git\", from: \"$VERSION\"),"
+            echo "],"
+            echo "targets: ["
+            echo "    .target("
+            echo "        name: \"YourTarget\","
+            echo "        dependencies: [.product(name: \"RMDoc\", package: \"rmdoc-swift\")]"
+            echo "    ),"
+            echo "]"
+            echo '```'
+            echo
+            echo "### As a binary"
+            echo
+            echo "The attached \`RMDoc.xcframework.zip\` is a **dynamic** framework of both"
+            echo "macOS slices (arm64 and x86_64), checked as such before it was uploaded."
+            echo
+            echo '```swift'
+            echo ".binaryTarget("
+            echo "    name: \"RMDoc\","
+            echo "    url: \"$SERVER/$REPO/releases/download/$TAG/RMDoc.xcframework.zip\","
+            echo "    checksum: \"$CHECKSUM\""
+            echo ")"
+            echo '```'
+            echo
+            echo "A binary module carries no testability, so a consumer's tests see the public"
+            echo "API only. A test that needs the inside of the reader or the writer belongs in"
+            echo "this repository."
+          } > notes.md
+          cat notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          flags=()
+          [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
+          gh release create "$TAG" \
+            RMDoc.xcframework.zip \
+            --title "RMDoc $VERSION" \
+            --notes-file notes.md \
+            "${flags[@]+"${flags[@]}"}"
