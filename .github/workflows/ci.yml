@@ -1,0 +1,68 @@
+# What has to be true of every push and every pull request.
+#
+# The refusal tests are the reason this file exists. Most of what this package
+# does on the way in is decline something — a name that escapes the unpack
+# directory, a flipped payload byte, a length the archive claims and cannot
+# have, a compression method we do not read. Those are the tests that stop
+# being true quietly: a refactor that widens a bounds check still passes every
+# round-trip test in the suite, because a round trip only ever feeds it bytes
+# it wrote itself. Nothing ran them on a push until this.
+#
+# macOS, and not by preference: the package declares `.macOS(.v15)` and
+# `Deflate.swift` imports `Compression`, which is Apple's and exists nowhere
+# else. The Xcode is chosen rather than pinned — `Package.swift` asks for tools
+# 6.3, and a runner image pinned to an older Xcode fails to parse the manifest
+# at all, with an error that reads like a syntax error and is not one.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Actions are pinned to a major tag: patches and security fixes arrive without
+# a commit here, and a major bump — which is the one that can break a build —
+# still has to be made on purpose. A repository that wants the stricter form
+# pins the full commit SHA instead, and then needs something like Dependabot to
+# move it.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Use the newest Xcode on the runner
+        run: Scripts/ci-select-xcode.sh
+      - run: swift build --build-tests
+      - run: swift test
+
+  lint:
+    name: SwiftLint
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: brew install swiftlint
+      # `--strict` because the configuration beside it has no warnings left to
+      # tolerate: every rule that fires on deliberate work is switched off by
+      # name, with the measurement that justified it. A warning here is new.
+      - run: swiftlint lint --strict
+
+  framework:
+    name: Build the xcframework
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Use the newest Xcode on the runner
+        run: Scripts/ci-select-xcode.sh
+      - run: brew install xcodegen
+      # The artefact a consumer links against, built the way a release is:
+      # the script's own checks refuse a static framework and one missing a
+      # slice, and both are failures that otherwise surface only in the
+      # consumer.
+      - run: Scripts/build-xcframework.sh
