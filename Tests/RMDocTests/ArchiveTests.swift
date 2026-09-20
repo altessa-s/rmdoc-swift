@@ -74,4 +74,19 @@ struct ArchiveTests {
             _ = try RMDocArchive(files: [])
         }
     }
+
+    @Test("More entries than the end record can count is refused")
+    func tooManyFilesAreRefused() throws {
+        // The end record counts its entries in sixteen bits, so 0xFFFF is
+        // the most an archive can carry and no zip64 follows it here. This
+        // is the cheap half of `archiveTooLarge`: the other half is four
+        // gigabytes of payload, which costs too much to reach in a test, so
+        // the count is where the ceiling gets held.
+        let files = try (0 ... 0xFFFF).map { index in
+            try RMDocFile(name: "\(documentID)/p\(index).rm", data: Data())
+        }
+        #expect(throws: RMDocError.archiveTooLarge) {
+            _ = try RMDocArchive(files: files).packed()
+        }
+    }
 }
