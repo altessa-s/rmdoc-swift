@@ -16,3 +16,8 @@ build/
 # follows `name:` in project.yml — it was RMLines.xcodeproj here for long
 # enough that the generated project was committed instead of ignored.
 RMDoc.xcodeproj/
+
+# The knowledge graph /graphify builds from this repo: HTML, report, node
+# data and its extraction cache. Derived from the sources beside it and
+# rebuilt on demand, so it is output rather than something to carry.
+graphify-out/
