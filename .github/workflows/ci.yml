@@ -18,8 +18,13 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
+
+# Least privilege, named rather than inherited: these jobs read the tree and
+# write nothing, and the default token would let them do more.
+permissions:
+  contents: read
 
 # Actions are pinned to a major tag: patches and security fixes arrive without
 # a commit here, and a major bump — which is the one that can break a build —
@@ -47,11 +52,19 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
-      - run: brew install swiftlint
+      # A release pinned by number rather than whatever Homebrew has today:
+      # `--strict` below turns every new rule a new SwiftLint ships into a red
+      # build, and a build that goes red without a commit is a build nobody
+      # can bisect. Bumping the number is a commit, reviewed like one.
+      - name: Install SwiftLint 0.65.1
+        run: |
+          curl -sSL -o swiftlint.zip \
+            https://github.com/realm/SwiftLint/releases/download/0.65.1/portable_swiftlint.zip
+          unzip -q swiftlint.zip -d swiftlint-bin
       # `--strict` because the configuration beside it has no warnings left to
       # tolerate: every rule that fires on deliberate work is switched off by
       # name, with the measurement that justified it. A warning here is new.
-      - run: swiftlint lint --strict
+      - run: swiftlint-bin/swiftlint lint --strict
 
   framework:
     name: Build the xcframework

@@ -7,9 +7,11 @@
 # that laptop. Here it is computed from the very bytes that are uploaded, in
 # the same step, so the two cannot drift.
 #
-# The tag is the version. `project.yml` carries 1.0.0 so that a local build
-# needs no ceremony, and this overrides it — a framework in a 1.2.0 release
-# that calls itself 1.0.0 is a discrepancy nothing would report.
+# The tag is the version. `project.yml` carries 0.0.0 — a number that says
+# only "not a release" — and this overrides it: a framework in a 1.2.0
+# release that calls itself anything else is a discrepancy nothing would
+# report. It said 1.0.0 once, and a local framework then outranked every
+# release that had actually shipped.
 
 name: Release
 

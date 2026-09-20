@@ -22,8 +22,24 @@ fi
 
 # A glob rather than `ls`: parsing `ls` breaks on names the shell would have
 # handled, and shellcheck is right to say so (SC2012).
-shopt -s nullglob
-installed=(/Applications/Xcode*.app)
+#
+# Betas are left out. The runner images carry them beside the releases, named
+# `Xcode_26.1_beta.app`, and `sort -V` puts a beta after the release it
+# precedes — so the newest by name would be the one whose toolchain is still
+# changing, and a red build on a Tuesday would be a compiler bug nobody here
+# can fix. Only when nothing else is installed does a beta get chosen.
+shopt -s nullglob nocaseglob
+installed=()
+betas=()
+for app in /Applications/Xcode*.app; do
+  case "$app" in
+    *beta*|*Beta*) betas+=("$app") ;;
+    *) installed+=("$app") ;;
+  esac
+done
+if [ ${#installed[@]} -eq 0 ]; then
+  installed=("${betas[@]+"${betas[@]}"}")
+fi
 if [ ${#installed[@]} -eq 0 ]; then
   echo "no Xcode found under /Applications" >&2
   exit 1

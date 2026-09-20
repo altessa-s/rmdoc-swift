@@ -18,7 +18,13 @@ struct ReaderTests {
     @Test("A truncated archive is refused rather than misread")
     func truncatedArchiveIsRefused() throws {
         let data = try sampleArchive().packed()
-        #expect(throws: (any Error).self) {
+        // Named, not merely thrown. The end record is the reader's only
+        // anchor into the file, and seven bytes off the tail take it with
+        // them — so a truncated archive is indistinguishable from bytes that
+        // were never a zip, and must refuse as one. `(any Error).self` would
+        // pass on anything at all, an error raised before the reader was
+        // reached included.
+        #expect(throws: RMDocError.notAnArchive) {
             _ = try RMDocArchive(unpacking: data.dropLast(7))
         }
     }
@@ -160,8 +166,39 @@ struct ReaderTests {
         for (index, byte) in [0xFF, 0xFF, 0xFF, 0xFF].enumerated() {
             bytes[directory.lowerBound + 24 + index] = UInt8(byte)
         }
-        #expect(throws: RMDocError.self) {
+        // The bound itself, named. `RMDocError.self` passes on any refusal
+        // the reader makes — including one raised before the ratio was ever
+        // consulted — so it cannot tell a working bound from a widened one,
+        // which is the single thing this test exists to hold.
+        #expect(
+            throws: RMDocError.malformedArchive(
+                "deflated entry claims more than deflate can produce: \(documentID).content"
+            )
+        ) {
             _ = try RMDocArchive(unpacking: bytes)
+        }
+    }
+
+    @Test("An entry whose payload runs past the file is refused on the claim")
+    func entryPayloadRunsPastTheFileIsRefused() throws {
+        var data = try sampleArchive().packed()
+        // The first directory entry's sizes: compressed at offset 20,
+        // uncompressed at 24. Both are set to 65535 — equal, so the stored
+        // entry's own agreement check passes and the bounds check is what
+        // must refuse — and far past the end of an archive this small.
+        let directory = try #require(data.range(of: Data([0x50, 0x4B, 0x01, 0x02])))
+        for field in [20, 24] {
+            data[directory.lowerBound + field] = 0xFF
+            data[directory.lowerBound + field + 1] = 0xFF
+            data[directory.lowerBound + field + 2] = 0
+            data[directory.lowerBound + field + 3] = 0
+        }
+        #expect(
+            throws: RMDocError.malformedArchive(
+                "entry data runs past the file: \(documentID).content"
+            )
+        ) {
+            _ = try RMDocArchive(unpacking: data)
         }
     }
 }
