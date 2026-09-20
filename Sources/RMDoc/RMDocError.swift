@@ -50,3 +50,34 @@ public enum RMDocError: Error, Equatable, Sendable {
     /// from and a `precondition` is the whole process.
     case archiveFinished
 }
+
+// Equality spelled out rather than synthesised.
+//
+// `@frozen` lets a consumer compare two values directly, through the witness
+// the compiler derives — and that witness is internal, so it is absent from
+// this module's symbol table when RMDoc is linked as a binary framework. A
+// generic comparison still goes through the exported protocol witness and is
+// fine; a concrete one — `error == .notAnArchive`, with both types in view —
+// resolves in a release build, where it is inlined, and fails to link in a
+// debug one. Declaring `==` here puts the comparison behind an exported
+// symbol, which costs nothing and keeps `@frozen`: a new case must still
+// break a consumer's build rather than fall into an `@unknown default`.
+extension RMDocError {
+    public static func == (lhs: RMDocError, rhs: RMDocError) -> Bool {
+        switch (lhs, rhs) {
+        case (.emptyArchive, .emptyArchive),
+             (.archiveTooLarge, .archiveTooLarge),
+             (.notAnArchive, .notAnArchive),
+             (.archiveFinished, .archiveFinished):
+            true
+        case let (.invalidName(left), .invalidName(right)): left == right
+        case let (.duplicateName(left), .duplicateName(right)): left == right
+        case let (.fileTooLarge(left), .fileTooLarge(right)): left == right
+        case let (.malformedArchive(left), .malformedArchive(right)): left == right
+        case let (.checksumMismatch(left), .checksumMismatch(right)): left == right
+        case let (.unsupportedCompression(leftName, leftMethod), .unsupportedCompression(rightName, rightMethod)):
+            leftName == rightName && leftMethod == rightMethod
+        default: false
+        }
+    }
+}
