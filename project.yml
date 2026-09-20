@@ -55,7 +55,11 @@ targets:
         # package has an opinion about.
         GENERATE_INFOPLIST_FILE: "YES"
         PRODUCT_BUNDLE_IDENTIFIER: io.altessa.rmdoc
-        MARKETING_VERSION: "1.0.0"
+        # What a local build calls itself, and it is not a version: 0.0.0 says
+        # "not a release". A release overrides it with the tag, through
+        # `Scripts/build-xcframework.sh`. It said 1.0.0 once, and a local framework
+        # then outranked every release that had actually shipped.
+        MARKETING_VERSION: "0.0.0"
         CURRENT_PROJECT_VERSION: "1"
         INSTALL_PATH: /Library/Frameworks
         # Both slices, always: the consumer's release build is universal, and
