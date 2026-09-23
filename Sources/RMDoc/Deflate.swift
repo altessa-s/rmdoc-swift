@@ -41,18 +41,41 @@ enum Deflate {
     /// bounded by the caller before it reaches here — a wrong one is a
     /// malformed archive, never a short read passed off as the payload.
     static func decompress(_ data: Data, count: Int) -> Data? {
-        guard count > 0 else { return Data() }
-        var output = Data(count: count)
-        let written = output.withUnsafeMutableBytes { (destination: UnsafeMutableRawBufferPointer) -> Int in
-            data.withUnsafeBytes { (source: UnsafeRawBufferPointer) -> Int in
+        guard count >= 0, count < Int.max, !data.isEmpty else { return nil }
+        // Leave room to detect output beyond the declared length, including
+        // when that length is zero. Filling a buffer does not prove EOF.
+        let capacity = count + 1
+        var output = Data(count: capacity)
+        let valid = output.withUnsafeMutableBytes { (destination: UnsafeMutableRawBufferPointer) -> Bool in
+            data.withUnsafeBytes { (source: UnsafeRawBufferPointer) -> Bool in
                 guard let destinationBase = destination.bindMemory(to: UInt8.self).baseAddress,
-                      let sourceBase = source.bindMemory(to: UInt8.self).baseAddress else { return 0 }
-                return compression_decode_buffer(
-                    destinationBase, count, sourceBase, data.count, nil, COMPRESSION_ZLIB
+                      let sourceBase = source.bindMemory(to: UInt8.self).baseAddress else { return false }
+                var stream = compression_stream(
+                    dst_ptr: destinationBase, dst_size: 0,
+                    src_ptr: sourceBase, src_size: 0, state: nil
                 )
+                guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB)
+                    != COMPRESSION_STATUS_ERROR else { return false }
+                defer { compression_stream_destroy(&stream) }
+                stream.src_ptr = sourceBase
+                stream.src_size = data.count
+                stream.dst_ptr = destinationBase
+                stream.dst_size = capacity
+                while true {
+                    let previousInput = stream.src_size
+                    let previousOutput = stream.dst_size
+                    let status = compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+                    if status == COMPRESSION_STATUS_END {
+                        return stream.src_size == 0 && capacity - stream.dst_size == count
+                    }
+                    guard status == COMPRESSION_STATUS_OK, stream.dst_size > 0,
+                          stream.src_size < previousInput || stream.dst_size < previousOutput
+                    else { return false }
+                }
             }
         }
-        guard written == count else { return nil }
+        guard valid else { return nil }
+        output.removeLast()
         return output
     }
 }
