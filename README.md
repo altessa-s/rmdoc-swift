@@ -1,5 +1,8 @@
 # RMDoc
 
+[![CI](https://github.com/altessa-s/rmdoc-swift/actions/workflows/ci.yml/badge.svg)](https://github.com/altessa-s/rmdoc-swift/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 The `.rmdoc` container: the file a reMarkable tablet and the reMarkable apps
 export and import a document as. Packing and unpacking, nothing else — what
 the files inside *mean* is the caller's business. It is **not sync v3** and
@@ -47,7 +50,7 @@ data descriptors; entries stored or deflated, read and written either way.
 Any other compression method is a named refusal (`unsupportedCompression`,
 with the method), not a guess at unpacking it — a sample first, code second.
 The writer stores by default and deflates on request
-(`RMDocWriter.Compression`), and every export the product makes asks for
+(`RMDocWriter.Compression`), and every export Slate Drive makes asks for
 deflate: the desktop app deflates, and a tablet handed a large stored
 container imports it and then dies of "Low memory" opening it, where the
 same bytes deflated open fine. Store stays the default so the fixture path
@@ -102,8 +105,8 @@ so the peak is one payload rather than all of them.
 
 ```swift
 dependencies: [
-    .package(path: "../rmdoc-swift"),
-    // or .package(url: "…/rmdoc-swift.git", from: "1.0.0")
+    .package(url: "https://github.com/altessa-s/rmdoc-swift.git", from: "0.10.1"),
+    // or, beside a checkout: .package(path: "../rmdoc-swift")
 ],
 targets: [
     .target(
@@ -116,13 +119,19 @@ targets: [
 ```
 
 **As a binary** — what Slate Drive does. `Scripts/build-xcframework.sh`
-produces `RMDoc.xcframework`, and the consumer names it as a binary target:
+produces `RMDoc.xcframework`, and every release attaches one, so the consumer
+names it as a binary target — by path, or by the `url` and `checksum` the
+release notes spell out:
 
 ```swift
 targets: [
     .binaryTarget(name: "RMDoc", path: "RMDoc.xcframework"),
 ]
 ```
+
+A binary module carries no testability, so a consumer's tests see the public
+API only. A test that needs the inside of the reader or the writer belongs in
+this repository.
 
 The framework is dynamic, because Xcode embeds a package's binary framework
 into the application bundle whatever it holds: it refuses a static one for
@@ -171,12 +180,45 @@ tablet can, the same way it is the judge of a rendering.
 
 ```sh
 Scripts/build-xcframework.sh                              # -> build/RMDoc.xcframework
-Scripts/build-xcframework.sh ../slitedrive-internal/ThirdParty/RMDoc
+Scripts/build-xcframework.sh ../some-app/Frameworks       # and install it there too
 ```
 
 `Package.swift` is the real project; `project.yml` beside it declares the same
 sources once more as a framework target, because SwiftPM cannot produce a
 framework — archiving its library product leaves a bare `.o`. The script
 generates that project with XcodeGen, archives it for macOS (arm64 and
-x86_64), checks that what came out is a dynamic framework of both slices, and
-wraps it.
+x86_64), iOS (arm64) and the iOS Simulator (arm64 and x86_64), checks that
+each is a dynamic framework with every slice it should have, and wraps them.
+It needs Xcode with Swift 6.3 and `brew install xcodegen`.
+
+## Releasing
+
+Push a tag. `1.2.0` and `v1.2.0` both work, and a hyphen makes it a
+pre-release (`1.2.0-beta.2`).
+
+```sh
+git tag 1.2.0
+git push origin 1.2.0
+```
+
+The tag runs the tests first — a release is the one artefact nobody re-reads,
+it is linked — then builds the framework, zips it with `ditto` (an
+`.xcframework` is a bundle of symlinks, and a plain `zip` unpacks into
+something Xcode declines), and publishes it with the lines a consumer pastes.
+The checksum is computed in the same step from the very bytes that are
+uploaded.
+
+The tag is also the version the framework declares. `project.yml` carries
+0.0.0, which says only "not a release"; to reproduce a release build locally:
+
+```sh
+RMDOC_VERSION=1.2.0 Scripts/build-xcframework.sh
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+reMarkable is a trademark of reMarkable AS. This project is not affiliated
+with, endorsed by or sponsored by reMarkable AS; the container format is
+implemented from exports the tablet and its apps make.

@@ -119,8 +119,9 @@ jobs:
             echo
             echo "### As a binary"
             echo
-            echo "The attached \`RMDoc.xcframework.zip\` is a **dynamic** framework of both"
-            echo "macOS slices (arm64 and x86_64), checked as such before it was uploaded."
+            echo "The attached \`RMDoc.xcframework.zip\` is a **dynamic** framework for macOS"
+            echo "(arm64 and x86_64), iOS (arm64) and the iOS Simulator (arm64 and x86_64),"
+            echo "every slice checked before it was uploaded."
             echo
             echo '```swift'
             echo ".binaryTarget("

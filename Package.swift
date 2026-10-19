@@ -5,7 +5,7 @@
 
 // The `.rmdoc` container: the file the tablet and the reMarkable apps export
 // and import a document as. Packing and unpacking only — a plain zip of the
-// document's files in the device layout, stored uncompressed. It is not sync
+// document's files in the device layout, stored or deflated. It is not sync
 // v3 and shares nothing with it: no docSchema, no hashes, none of the cloud's
 // code.
 //
