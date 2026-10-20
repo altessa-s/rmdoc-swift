@@ -30,6 +30,19 @@ enum NameRule {
         }
     }
 
+    /// The document a name belongs to: the folder for a page file, the stem
+    /// for a root file. One spelling for `RMDocFile` and `RMDocEntry` both,
+    /// so a file and the directory entry it came from answer alike.
+    static func documentID(of name: String) -> String {
+        if let slash = name.firstIndex(of: "/") {
+            return String(name[..<slash])
+        }
+        if let dot = name.firstIndex(of: ".") {
+            return String(name[..<dot])
+        }
+        return name
+    }
+
     /// The longest name a zip can spell. The field that carries it is
     /// sixteen bits wide, in the local header and in the central directory
     /// both, so a longer name has no representation in the container — and
