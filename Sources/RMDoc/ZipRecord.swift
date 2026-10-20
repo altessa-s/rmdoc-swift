@@ -40,7 +40,7 @@ extension ZipReader {
     /// One directory record and the local header it points at, each claim
     /// checked against the file and against the other.
     static func record(
-        at cursor: Int, in bytes: Bytes, directoryOffset: Int, directoryEnd: Int
+        at cursor: Int, in bytes: Bytes, directoryOffset: Int, directoryEnd: Int, maximumNameLength: Int
     ) throws -> Record {
         guard cursor + 46 <= directoryEnd, try bytes.u32(cursor) == 0x0201_4B50 else {
             throw RMDocError.malformedArchive("directory entry does not start where the last one ended")
@@ -60,6 +60,11 @@ extension ZipReader {
         let recordEnd = cursor + 46 + nameLength + extraLength + commentLength
         guard recordEnd <= directoryEnd else {
             throw RMDocError.malformedArchive("directory entry runs past the directory")
+        }
+        // Weighed on the length field, before a byte of the name is copied
+        // or decoded: the name is what a listing spends its memory on.
+        guard nameLength <= maximumNameLength else {
+            throw RMDocReadError.nameTooLong(length: nameLength, limit: maximumNameLength)
         }
         let nameBytes = try bytes.slice(cursor + 46, nameLength)
         guard let name = String(data: nameBytes, encoding: .utf8) else {

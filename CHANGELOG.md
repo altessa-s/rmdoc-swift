@@ -4,6 +4,60 @@ Releases are tagged and published from GitHub; this file records what each
 one changes for a consumer. Earlier releases are described in their GitHub
 release notes.
 
+## 0.11.1 — 2026-10-20
+
+Additive, with no change in behaviour: every 0.11.0 signature is kept,
+source- and binary-compatible, and every default reads exactly what 0.11.0
+read. The new API is new overloads, new stored properties on the non-frozen
+`RMDocReadLimits`, and new cases on the non-frozen `RMDocReadError`. The new
+overloads and initialiser are `@_disfavoredOverload`, so an unapplied
+reference that named one declaration in 0.11.0 —
+`RMDocArchive.forEachFile(unpacking:_:)`, `RMDocReadLimits.init` — still
+names that one rather than becoming ambiguous.
+
+### Added
+
+- `RMDocArchive.forEachFile(unpacking:limits:where:_:)`,
+  `forEachFile(unpacking:limits:_:)` and `forEachFile(unpacking:_:)` from
+  `Data`, beside the `URL` ones, which now map the file and call them. A host
+  that mapped a file, listed it with `entries(in:limits:)` and vetted the
+  entries reads through the same mapping — no reopen of the path for another
+  file to be swapped in behind. A mapping is not a snapshot: the file must
+  stay unchanged during listing and reading, and a host that needs a
+  guaranteed snapshot still copies it first. Deflated payloads are
+  inflated in place out of the caller's `Data`, exactly as out of a mapping;
+  a slice with a non-zero `startIndex` reads like the whole.
+- `RMDocReadLimits.maximumDirectorySize`: the most bytes the central
+  directory may span as the end record declares it, weighed before the first
+  record is read.
+- `RMDocReadLimits.maximumNameLength`: the longest name one directory record
+  may carry, weighed on its length field before the name is copied or
+  decoded.
+- Both are opt-in: `.default` and `.format` leave them at the format's own
+  ceilings (`.max` and 65 535), so nothing 0.11.0 read is refused. For
+  untrusted input, set them — 16 MiB and 1 024 refuse nothing a tablet
+  makes: 16 MiB is 256 bytes a record at the format's 65 535 entries, while
+  tablet names are UUID paths under a hundred bytes (the full 65 535 entries
+  list in under 9 MiB); 1 024 is `PATH_MAX` on macOS and iOS, past which a
+  name cannot be unpacked to disk anyway. A tighter host can go lower.
+  Both hold over the whole archive whatever a read chooses, like
+  `maximumEntryCount`, and apply to `entries(in:limits:)` as well as to
+  every read.
+- `RMDocReadLimits.init(…, maximumDirectorySize:maximumNameLength:)`. The
+  0.11.0 initialiser stays; a call naming neither new limit resolves to it.
+- `RMDocReadError.directoryTooLarge(size:limit:)` and
+  `RMDocReadError.nameTooLong(length:limit:)`. A `switch` with an
+  `@unknown default`, as recommended for 0.11.0, needs no change.
+
+### Changed
+
+- With the new limits set, the order of a directory's refusals: a declared
+  directory that runs past the file is still `malformedArchive`, checked
+  first; a real one over the limit is `directoryTooLarge`, before any record.
+  Within a record, a name over the limit is refused before it is decoded or
+  validated, so a long hostile name is reported as `nameTooLong` rather than
+  `invalidName`.
+
 ## 0.11.0 — 2026-10-20
 
 ### BREAKING (behaviour)

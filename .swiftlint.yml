@@ -10,7 +10,7 @@
 #
 # Every number below was measured against this tree, and every rule that is
 # off is off for a reason given on the spot. Fourteen files of sources and
-# eleven of tests, the longest of them `ZipRecord.swift` at 209 lines and
+# fourteen of tests, the longest of them `ZipReader.swift` at 232 lines and
 # `StructureTests.swift` at 297.
 
 excluded:
@@ -28,7 +28,7 @@ disabled_rules:
   # a house style, and the linter does not get a vote.
   - trailing_comma
 
-  # Both fire on `ZipReader.record(at:in:directoryOffset:directoryEnd:)`, the
+  # Both fire on `ZipReader.record(at:in:directoryOffset:directoryEnd:maximumNameLength:)`, the
   # one function that reads a directory record and its local header. A zip entry has a
   # fixed list of fields and every one of them is a claim to be checked
   # before it is used, so the branches are the format's rather than the
