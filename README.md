@@ -153,7 +153,7 @@ directory before any is inflated.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/altessa-s/rmdoc-swift.git", from: "0.10.1"),
+    .package(url: "https://github.com/altessa-s/rmdoc-swift.git", from: "0.11.0"),
     // or, beside a checkout: .package(path: "../rmdoc-swift")
 ],
 targets: [
