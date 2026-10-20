@@ -30,12 +30,6 @@ public struct RMDocFile: Sendable, Equatable {
     /// stem for a root file — `<uuid>.content` and `<uuid>/<page>.rm`
     /// answer the same identifier.
     public var documentID: String {
-        if let slash = name.firstIndex(of: "/") {
-            return String(name[..<slash])
-        }
-        if let dot = name.firstIndex(of: ".") {
-            return String(name[..<dot])
-        }
-        return name
+        NameRule.documentID(of: name)
     }
 }

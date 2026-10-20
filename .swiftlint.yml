@@ -9,9 +9,9 @@
 # does not.
 #
 # Every number below was measured against this tree, and every rule that is
-# off is off for a reason given on the spot. Ten files of sources and five
-# of tests, the longest of them `RMDocWriter.swift` at 198 lines and
-# `ReaderTests.swift` at 167.
+# off is off for a reason given on the spot. Fourteen files of sources and
+# eleven of tests, the longest of them `ZipRecord.swift` at 209 lines and
+# `StructureTests.swift` at 297.
 
 excluded:
   - .build
@@ -28,8 +28,8 @@ disabled_rules:
   # a house style, and the linter does not get a vote.
   - trailing_comma
 
-  # One violation each, and both are `ZipReader.forEachEntry`: 65 lines
-  # against a ceiling of 50, complexity 14 against 10. A zip entry has a
+  # Both fire on `ZipReader.record(at:in:directoryOffset:directoryEnd:)`, the
+  # one function that reads a directory record and its local header. A zip entry has a
   # fixed list of fields and every one of them is a claim to be checked
   # before it is used, so the branches are the format's rather than the
   # function's — splitting it would put the bounds check in one place and the
