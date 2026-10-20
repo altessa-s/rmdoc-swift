@@ -4,7 +4,7 @@ Releases are tagged and published from GitHub; this file records what each
 one changes for a consumer. Earlier releases are described in their GitHub
 release notes.
 
-## Unreleased (0.11.1)
+## 0.11.1 — 2026-10-20
 
 Additive, with no change in behaviour: every 0.11.0 signature is kept,
 source- and binary-compatible, and every default reads exactly what 0.11.0
