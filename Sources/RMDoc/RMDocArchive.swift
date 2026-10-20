@@ -31,8 +31,17 @@ public struct RMDocArchive: Sendable, Equatable {
     /// Import: read a container somebody handed us. Every name passes the
     /// same validation as a file built by hand, so a hostile archive cannot
     /// name its way out of the directory it will be unpacked into.
+    ///
+    /// Under `RMDocReadLimits.default`; `init(unpacking:limits:)` takes the
+    /// host's own.
     public init(unpacking data: Data) throws {
-        let entries = try ZipReader.unpack(data)
+        try self.init(unpacking: data, limits: .default)
+    }
+
+    /// Import under the caller's limits, weighed over every entry before
+    /// the first is inflated.
+    public init(unpacking data: Data, limits: RMDocReadLimits) throws {
+        let entries = try ZipReader.unpack(data, limits: limits)
         try self.init(files: entries.map { try RMDocFile(name: $0.name, data: $0.data) })
     }
 
@@ -41,7 +50,33 @@ public struct RMDocArchive: Sendable, Equatable {
     /// can drop rather than heap the process must hold — what remains on
     /// the heap is the files themselves.
     public init(unpacking url: URL) throws {
-        try self.init(unpacking: Data(contentsOf: url, options: .mappedIfSafe))
+        try self.init(unpacking: url, limits: .default)
+    }
+
+    /// Import from a file under the caller's limits.
+    public init(unpacking url: URL, limits: RMDocReadLimits) throws {
+        try self.init(unpacking: Data(contentsOf: url, options: .mappedIfSafe), limits: limits)
+    }
+
+    /// The container's table of contents, read from its central directory
+    /// and nothing else: no entry is inflated, so listing a container costs
+    /// the size of its directory whatever its entries declare.
+    ///
+    /// Every structural refusal a read makes is made here too — a hostile
+    /// name, a name used twice, a payload outside the file, a local header
+    /// that disagrees with the directory, entries that share bytes, a claim
+    /// deflate could not keep — so what is listed is what a read would
+    /// attempt. Of `limits`, only `maximumEntryCount` applies: the sizes are
+    /// what a caller lists in order to weigh them, and are weighed when the
+    /// entries are read.
+    public static func entries(in data: Data, limits: RMDocReadLimits = .default) throws -> [RMDocEntry] {
+        try ZipReader.directory(of: data, limits: limits).map(\.entry)
+    }
+
+    /// The table of contents of the container at `url`, which is mapped
+    /// rather than read: the pages behind the entries are never touched.
+    public static func entries(in url: URL, limits: RMDocReadLimits = .default) throws -> [RMDocEntry] {
+        try entries(in: Data(contentsOf: url, options: .mappedIfSafe), limits: limits)
     }
 
     /// Every file in turn, and never the archive whole.
@@ -54,18 +89,47 @@ public struct RMDocArchive: Sendable, Equatable {
     /// straight to disk holds one at a time.
     ///
     /// The refusals are the initialiser's, in the same order: a hostile
-    /// name, a name used twice, an archive with nothing in it.
+    /// name, a name used twice, an archive with nothing in it. Under
+    /// `RMDocReadLimits.default`.
     public static func forEachFile(unpacking url: URL, _ body: (RMDocFile) throws -> Void) throws {
+        try forEachFile(unpacking: url, limits: .default, where: { _ in true }, body)
+    }
+
+    /// Every file in turn, under the caller's limits.
+    public static func forEachFile(
+        unpacking url: URL,
+        limits: RMDocReadLimits,
+        _ body: (RMDocFile) throws -> Void
+    ) throws {
+        try forEachFile(unpacking: url, limits: limits, where: { _ in true }, body)
+    }
+
+    /// The files a caller chooses, each chosen before anything is inflated.
+    ///
+    /// `include` is asked about every entry, in the order the directory
+    /// lists them, with what the directory says about it — name, method,
+    /// sizes, checksum — and before a byte of any entry is inflated. What it
+    /// declines is never inflated, never checksummed and never weighed
+    /// against the size limits; what it accepts is weighed all together, and
+    /// only then read, one file at a time, in directory order.
+    ///
+    /// The whole directory is still checked first — a hostile name or a
+    /// lying record anywhere refuses the archive, chosen or not — because an
+    /// archive that lies about one entry is not trusted about the others.
+    /// For the same reason `limits.maximumEntryCount` counts every entry of
+    /// the archive, before `include` is asked about any: it bounds the walk
+    /// that has to happen before there is anything to choose from.
+    /// Choosing nothing reads nothing and is not a refusal.
+    public static func forEachFile(
+        unpacking url: URL,
+        limits: RMDocReadLimits = .default,
+        where include: (RMDocEntry) throws -> Bool,
+        _ body: (RMDocFile) throws -> Void
+    ) throws {
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        var seen: Set<String> = []
-        try ZipReader.forEachEntry(in: data) { entry in
-            let file = try RMDocFile(name: entry.name, data: entry.data)
-            guard seen.insert(file.name).inserted else {
-                throw RMDocError.duplicateName(file.name)
-            }
-            try body(file)
+        try ZipReader.forEachEntry(in: data, limits: limits, where: include) { entry in
+            try body(RMDocFile(name: entry.name, data: entry.data))
         }
-        guard !seen.isEmpty else { throw RMDocError.emptyArchive }
     }
 
     /// The container as bytes, ready to be written as `<name>.rmdoc`.
