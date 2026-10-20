@@ -11,13 +11,25 @@ import Foundation
 /// happens and no claim can reach past the file's own bytes. A deflated
 /// entry's uncompressed length is a claim too, and is bounded against what
 /// deflate can physically produce before anything is allocated for it.
+///
+/// In two passes. The first reads the central directory whole and inflates
+/// nothing: every record is checked against the file, against its local
+/// header and against every other record, and what survives is a list of
+/// entries a caller can choose from. The second inflates the chosen entries
+/// alone, once the caller's limits have weighed all of them together — so a
+/// refusal never comes after half a pass, and an entry passed over is never
+/// touched.
 enum ZipReader {
-    /// Every read below is bounds-checked before it happens: the lengths and
-    /// offsets come off the wire, and the file's word alone must not be able
-    /// to reach past its own bytes.
-    static func unpack(_ data: Data) throws -> [ZipEntry] {
+    /// An entry, and where its payload sits in the file.
+    struct Located {
+        let entry: RMDocEntry
+        let payload: Range<Int>
+    }
+
+    /// Every entry, inflated and verified, held at once.
+    static func unpack(_ data: Data, limits: RMDocReadLimits = .default) throws -> [ZipEntry] {
         var entries: [ZipEntry] = []
-        try forEachEntry(in: data) { entries.append($0) }
+        try forEachEntry(in: data, limits: limits) { entries.append($0) }
         return entries
     }
 
@@ -25,99 +37,147 @@ enum ZipReader {
     /// gathering them. What it buys is the payloads: a caller that writes
     /// each file out as it arrives never holds more than one of them, where
     /// `unpack` holds every one at once.
-    static func forEachEntry(in data: Data, _ body: (ZipEntry) throws -> Void) throws {
-        guard let endRecord = findEndRecord(in: data) else {
+    ///
+    /// `include` sees every entry, in directory order, before anything is
+    /// inflated; `didInflate` is told each time a deflated payload is about
+    /// to be — what a test counts to show a skipped entry never was.
+    static func forEachEntry(
+        in data: Data,
+        limits: RMDocReadLimits = .default,
+        where include: (RMDocEntry) throws -> Bool = { _ in true },
+        didInflate: ((RMDocEntry) -> Void)? = nil,
+        _ body: (ZipEntry) throws -> Void
+    ) throws {
+        let chosen = try directory(of: data, limits: limits).filter { try include($0.entry) }
+        try limits.check(chosen.map(\.entry))
+        for located in chosen {
+            let bytes = try contents(of: located, in: data, didInflate: didInflate)
+            try body(ZipEntry(name: located.entry.name, data: bytes))
+        }
+    }
+
+    /// One entry's bytes, inflated if they were deflated, and verified
+    /// against the checksum the directory carries for them.
+    private static func contents(
+        of located: Located, in data: Data, didInflate: ((RMDocEntry) -> Void)?
+    ) throws -> Data {
+        let entry = located.entry
+        let bytes: Data
+        if entry.isCompressed {
+            didInflate?(entry)
+            // Inflated in place, out of the (usually mapped) archive: the
+            // compressed payload is never copied, so its size costs reading
+            // time rather than heap — and `maximumCompressedEntrySize` and
+            // `maximumCompressedTotalSize` bound the time.
+            let inflated = data.withUnsafeBytes { archive in
+                Deflate.decompress(
+                    UnsafeRawBufferPointer(rebasing: archive[located.payload]), count: entry.uncompressedSize
+                )
+            }
+            guard let inflated else {
+                throw RMDocError.malformedArchive("deflated entry does not inflate: \(entry.name)")
+            }
+            bytes = inflated
+        } else {
+            // A stored payload is the file itself, and its length is the
+            // declared size the limits have already weighed.
+            let base = data.startIndex
+            bytes = data.subdata(in: base + located.payload.lowerBound ..< base + located.payload.upperBound)
+        }
+        // Over the entry's own bytes, which for a deflated entry is what
+        // came out — the checksum a zip carries is of the payload, never
+        // of its compressed form.
+        guard CRC32.checksum(bytes) == entry.crc32 else {
+            throw RMDocError.checksumMismatch(name: entry.name)
+        }
+        return bytes
+    }
+
+    /// The table of contents, every claim in it checked and nothing
+    /// inflated.
+    ///
+    /// The order of the checks is part of the contract: each refusal names
+    /// the first thing wrong, and the tests pin which that is.
+    static func directory(of data: Data, limits: RMDocReadLimits = .default) throws -> [Located] {
+        let bytes = Bytes(data: data)
+        guard let end = findEndRecord(in: bytes) else {
             throw RMDocError.notAnArchive
         }
-        let entryCount = Int(readU16(data, at: endRecord + 10))
-        let directorySize = Int(readU32(data, at: endRecord + 12))
-        let directoryOffset = Int(readU32(data, at: endRecord + 16))
+        let thisDisk = try bytes.u16(end + 4)
+        let directoryDisk = try bytes.u16(end + 6)
+        let entriesOnDisk = try bytes.u16(end + 8)
+        let entryCount = try bytes.u16(end + 10)
+        let directorySize = try bytes.u32(end + 12)
+        let directoryOffset = try bytes.u32(end + 16)
+        // ZIP64 announces itself with a locator right before the end record
+        // — after the directory, not inside it: the last record's comment
+        // may end in the same four bytes and is no locator. When the end
+        // record's own fields are ZIP64's sentinels, the directory's end is
+        // unknowable and the signature is taken at its word.
+        let locator = end - 20
+        if locator >= 0, try bytes.u32(locator) == 0x0706_4B50 {
+            let sentinel = directorySize == 0xFFFF_FFFF || directoryOffset == 0xFFFF_FFFF
+            if sentinel || locator >= directoryOffset + directorySize {
+                throw RMDocReadError.zip64Unsupported
+            }
+        }
+        guard thisDisk == 0, directoryDisk == 0, entriesOnDisk == entryCount else {
+            throw RMDocReadError.spannedArchive
+        }
+        guard entryCount <= limits.maximumEntryCount else {
+            throw RMDocReadError.tooManyEntries(count: entryCount, limit: limits.maximumEntryCount)
+        }
         let directoryEnd = directoryOffset + directorySize
-        guard directoryEnd <= endRecord else {
+        guard directoryEnd <= end else {
             throw RMDocError.malformedArchive("central directory outside the file")
         }
 
+        var records: [Record] = []
+        records.reserveCapacity(entryCount)
+        var names: Set<String> = []
         var cursor = directoryOffset
         for _ in 0 ..< entryCount {
-            guard cursor + 46 <= directoryEnd,
-                  readU32(data, at: cursor) == 0x0201_4B50 else {
-                throw RMDocError.malformedArchive("directory entry does not start where the last one ended")
+            let record = try record(
+                at: cursor, in: bytes, directoryOffset: directoryOffset, directoryEnd: directoryEnd
+            )
+            let name = record.located.entry.name
+            guard names.insert(name).inserted else {
+                throw RMDocError.duplicateName(name)
             }
-            let method = Int(readU16(data, at: cursor + 10))
-            let crc = readU32(data, at: cursor + 16)
-            let compressed = Int(readU32(data, at: cursor + 20))
-            let uncompressed = Int(readU32(data, at: cursor + 24))
-            let nameLength = Int(readU16(data, at: cursor + 28))
-            let extraLength = Int(readU16(data, at: cursor + 30))
-            let commentLength = Int(readU16(data, at: cursor + 32))
-            let localOffset = Int(readU32(data, at: cursor + 42))
-            guard cursor + 46 + nameLength <= directoryEnd else {
-                throw RMDocError.malformedArchive("entry name runs past the directory")
-            }
-            guard let name = String(data: slice(data, cursor + 46, nameLength), encoding: .utf8) else {
-                throw RMDocError.malformedArchive("entry name is not UTF-8")
-            }
-            // Stored and deflated, the two shapes a measured export uses:
-            // some official exports store, the current desktop app deflates.
-            // Anything else is news worth a sample, not a guess at unpacking
-            // it — and it is refused with its method named.
-            guard method == 0 || method == 8 else {
-                throw RMDocError.unsupportedCompression(name: name, method: method)
-            }
-            if method == 0, compressed != uncompressed {
-                throw RMDocError.malformedArchive("stored entry sizes disagree: \(name)")
-            }
-            // Checked before the allocation, not after: the uncompressed
-            // length is the file's word, and deflate cannot have produced
-            // more than `maximumRatio` times what it holds.
-            if method == 8, uncompressed > compressed * Deflate.maximumRatio {
-                throw RMDocError.malformedArchive("deflated entry claims more than deflate can produce: \(name)")
-            }
-            // The local header restates the name and may carry extra fields
-            // of its own; its lengths, not the directory's, say where the
-            // payload begins.
-            guard localOffset + 30 <= data.count,
-                  readU32(data, at: localOffset) == 0x0403_4B50 else {
-                throw RMDocError.malformedArchive("local header missing: \(name)")
-            }
-            let localNameLength = Int(readU16(data, at: localOffset + 26))
-            let localExtraLength = Int(readU16(data, at: localOffset + 28))
-            let payloadStart = localOffset + 30 + localNameLength + localExtraLength
-            guard payloadStart + compressed <= data.count else {
-                throw RMDocError.malformedArchive("entry data runs past the file: \(name)")
-            }
-            let payload = slice(data, payloadStart, compressed)
-            let bytes: Data
-            if method == 8 {
-                guard let inflated = Deflate.decompress(payload, count: uncompressed) else {
-                    throw RMDocError.malformedArchive("deflated entry does not inflate: \(name)")
-                }
-                bytes = inflated
-            } else {
-                bytes = payload
-            }
-            // Over the entry's own bytes, which for a deflated entry is what
-            // came out — the checksum a zip carries is of the payload, never
-            // of its compressed form.
-            guard CRC32.checksum(bytes) == crc else {
-                throw RMDocError.checksumMismatch(name: name)
-            }
-            try body(ZipEntry(name: name, data: bytes))
-            cursor += 46 + nameLength + extraLength + commentLength
+            records.append(record)
+            cursor = record.end
         }
+        // A directory longer than its count hides entries from this reader
+        // that another reader would see; two readers must not disagree about
+        // what an archive holds.
+        guard cursor == directoryEnd else {
+            throw RMDocError.malformedArchive("central directory holds more than the end record counts")
+        }
+        guard !records.isEmpty else { throw RMDocError.emptyArchive }
+        // Two records pointing into the same bytes is how a few kilobytes
+        // become a petabyte of output without one entry looking unusual —
+        // the overlapping-entry bomb. An honest archive lays its entries end
+        // to end.
+        let ordered = records.sorted { $0.region.lowerBound < $1.region.lowerBound }
+        for (previous, next) in zip(ordered, ordered.dropFirst())
+        where previous.region.upperBound > next.region.lowerBound {
+            throw RMDocError.malformedArchive("entries overlap: \(next.located.entry.name)")
+        }
+        return records.map(\.located)
     }
 
     /// The end record is found from the tail: it is the one structure with a
     /// variable-length comment behind it, so the last 65557 bytes are the
     /// only place it can sit. A match must also account for every byte after
     /// itself, or the signature inside some entry's payload would pass.
-    private static func findEndRecord(in data: Data) -> Int? {
-        guard data.count >= 22 else { return nil }
-        let lowest = max(0, data.count - 22 - 0xFFFF)
-        var offset = data.count - 22
+    private static func findEndRecord(in bytes: Bytes) -> Int? {
+        guard bytes.count >= 22 else { return nil }
+        let lowest = max(0, bytes.count - 22 - 0xFFFF)
+        var offset = bytes.count - 22
         while offset >= lowest {
-            if readU32(data, at: offset) == 0x0605_4B50,
-               offset + 22 + Int(readU16(data, at: offset + 20)) == data.count {
+            if (try? bytes.u32(offset)) == 0x0605_4B50,
+               let comment = try? bytes.u16(offset + 20),
+               offset + 22 + comment == bytes.count {
                 return offset
             }
             offset -= 1
@@ -125,20 +185,35 @@ enum ZipReader {
         return nil
     }
 
-    // The incoming Data may be a slice with a non-zero start, so every
-    // absolute offset is taken from its own `startIndex`.
+    /// Little-endian reads that refuse to leave the file. Every offset
+    /// above is a sum of fields at most 32 bits wide, so none of the
+    /// arithmetic can overflow an `Int`; the reads themselves are where a
+    /// claim pointing past the bytes is caught.
+    ///
+    /// The incoming Data may be a slice with a non-zero start, so every
+    /// absolute offset is taken from its own `startIndex`.
+    struct Bytes {
+        let data: Data
+        var count: Int { data.count }
 
-    private static func readU16(_ data: Data, at offset: Int) -> UInt16 {
-        let base = data.startIndex + offset
-        return UInt16(data[base]) | UInt16(data[base + 1]) << 8
-    }
+        func u16(_ offset: Int) throws -> Int {
+            guard offset >= 0, offset + 2 <= data.count else {
+                throw RMDocError.malformedArchive("a field runs past the file")
+            }
+            let base = data.startIndex + offset
+            return Int(data[base]) | Int(data[base + 1]) << 8
+        }
 
-    private static func readU32(_ data: Data, at offset: Int) -> UInt32 {
-        UInt32(readU16(data, at: offset)) | UInt32(readU16(data, at: offset + 2)) << 16
-    }
+        func u32(_ offset: Int) throws -> Int {
+            try u16(offset) | u16(offset + 2) << 16
+        }
 
-    private static func slice(_ data: Data, _ offset: Int, _ count: Int) -> Data {
-        let base = data.startIndex + offset
-        return data.subdata(in: base ..< base + count)
+        func slice(_ offset: Int, _ length: Int) throws -> Data {
+            guard offset >= 0, length >= 0, offset + length <= data.count else {
+                throw RMDocError.malformedArchive("a field runs past the file")
+            }
+            let base = data.startIndex + offset
+            return data.subdata(in: base ..< base + length)
+        }
     }
 }

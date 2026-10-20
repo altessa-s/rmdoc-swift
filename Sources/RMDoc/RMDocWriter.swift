@@ -18,8 +18,9 @@ import Foundation
 /// A streamed file's checksum and length are learned as the payload goes
 /// past and then written back into its header, which is why the output is
 /// a file and not a pipe: the alternative — data descriptors after the
-/// payload — is a corner of zip that official exports do not use and our
-/// own reader does not read. Patching keeps the subset exact.
+/// payload — is a corner of zip that official exports do not use, and that
+/// our own reader accepts only by checking it against the directory.
+/// Patching keeps what is written inside the subset.
 ///
 /// A throw from any method leaves a half-written file behind; the caller
 /// who staged the output throws it away. Not `Sendable` on purpose: one
