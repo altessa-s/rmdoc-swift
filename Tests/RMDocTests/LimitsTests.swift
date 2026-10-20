@@ -129,7 +129,7 @@ struct LimitsTests {
         }
     }
 
-    @Test("The listing weighs the count alone; the sizes are what it is for")
+    @Test("The listing weighs the directory's limits alone; the sizes are what it is for")
     func listingIgnoresSizeLimits() throws {
         let url = try threeFiles()
         defer { try? FileManager.default.removeItem(at: url) }
@@ -149,7 +149,7 @@ struct LimitsTests {
         #expect(Deflate.decompress(squeezed, count: 16 << 20) == Data(count: 16 << 20))
     }
 
-    @Test("The defaults are the format's ceilings on size and 200:1 past a megabyte")
+    @Test("The defaults are the format's ceilings on size, 200:1 past a megabyte")
     func defaultsAreDocumented() {
         let limits = RMDocReadLimits.default
         #expect(limits.maximumEntryCount == 0xFFFF)
@@ -159,6 +159,8 @@ struct LimitsTests {
         #expect(limits.maximumCompressedTotalSize == .max)
         #expect(limits.maximumCompressionRatio == 200)
         #expect(limits.compressionRatioThreshold == 1 << 20)
+        #expect(limits.maximumDirectorySize == .max)
+        #expect(limits.maximumNameLength == 0xFFFF)
         #expect(RMDocReadLimits.format.maximumCompressionRatio == Deflate.maximumRatio)
         #expect(RMDocReadLimits.format.compressionRatioThreshold == 0)
     }

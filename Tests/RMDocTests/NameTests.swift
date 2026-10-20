@@ -76,6 +76,10 @@ struct NameTests {
         // The ceiling itself is a legal name and must still pack.
         let packed = try RMDocArchive(files: [RMDocFile(name: atLimit, data: Data("x".utf8))]).packed()
         #expect(try RMDocArchive(unpacking: packed).files.first?.name == atLimit)
+        // A host that sets the name ceiling for untrusted input refuses it.
+        #expect(throws: RMDocReadError.nameTooLong(length: 0xFFFF, limit: 1024)) {
+            _ = try RMDocArchive(unpacking: packed, limits: RMDocReadLimits(maximumNameLength: 1024))
+        }
         // One byte past it has no representation in the container.
         #expect(throws: RMDocError.invalidName(overLimit)) {
             _ = try RMDocFile(name: overLimit, data: Data())

@@ -39,6 +39,14 @@ public enum RMDocReadError: Error, Equatable, Sendable {
     /// The entries of one read together occupy more of the archive than
     /// `maximumCompressedTotalSize`; `name` is the entry that crossed it.
     case compressedTotalSizeExceeded(name: String, limit: Int)
+    /// The end record declares a central directory of more than
+    /// `maximumDirectorySize` bytes. Refused before any record is read.
+    /// Added in 0.11.1.
+    case directoryTooLarge(size: Int, limit: Int)
+    /// A directory record carries a name of more than `maximumNameLength`
+    /// UTF-8 bytes. Refused before the name is decoded — which is why the
+    /// case has its length and not the name. Added in 0.11.1.
+    case nameTooLong(length: Int, limit: Int)
     /// The archive uses ZIP64. Refused rather than read: no export comes
     /// near the four gigabytes that need it, the writer never produces it,
     /// and `RMDocFile` cannot hold a payload that large anyway — a reader
@@ -79,6 +87,10 @@ extension RMDocReadError {
             leftName == rightName && leftSize == rightSize && leftLimit == rightLimit
         case let (.compressedTotalSizeExceeded(leftName, leftLimit), .compressedTotalSizeExceeded(rightName, rightLimit)):
             leftName == rightName && leftLimit == rightLimit
+        case let (.directoryTooLarge(leftSize, leftLimit), .directoryTooLarge(rightSize, rightLimit)):
+            leftSize == rightSize && leftLimit == rightLimit
+        case let (.nameTooLong(leftLength, leftLimit), .nameTooLong(rightLength, rightLimit)):
+            leftLength == rightLength && leftLimit == rightLimit
         case let (.encryptedEntry(left), .encryptedEntry(right)):
             left == right
         default:
