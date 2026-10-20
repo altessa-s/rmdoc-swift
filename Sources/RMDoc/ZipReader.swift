@@ -40,18 +40,21 @@ enum ZipReader {
     ///
     /// `include` sees every entry, in directory order, before anything is
     /// inflated; `didInflate` is told each time a deflated payload is about
-    /// to be — what a test counts to show a skipped entry never was.
+    /// to be — what a test counts to show a skipped entry never was — and
+    /// `inflatingFrom` is shown the very bytes the decoder reads, which a
+    /// test holds against the archive's own to show they were not copied.
     static func forEachEntry(
         in data: Data,
         limits: RMDocReadLimits = .default,
         where include: (RMDocEntry) throws -> Bool = { _ in true },
         didInflate: ((RMDocEntry) -> Void)? = nil,
+        inflatingFrom: ((UnsafeRawBufferPointer) -> Void)? = nil,
         _ body: (ZipEntry) throws -> Void
     ) throws {
         let chosen = try directory(of: data, limits: limits).filter { try include($0.entry) }
         try limits.check(chosen.map(\.entry))
         for located in chosen {
-            let bytes = try contents(of: located, in: data, didInflate: didInflate)
+            let bytes = try contents(of: located, in: data, didInflate: didInflate, inflatingFrom: inflatingFrom)
             try body(ZipEntry(name: located.entry.name, data: bytes))
         }
     }
@@ -59,20 +62,24 @@ enum ZipReader {
     /// One entry's bytes, inflated if they were deflated, and verified
     /// against the checksum the directory carries for them.
     private static func contents(
-        of located: Located, in data: Data, didInflate: ((RMDocEntry) -> Void)?
+        of located: Located,
+        in data: Data,
+        didInflate: ((RMDocEntry) -> Void)?,
+        inflatingFrom: ((UnsafeRawBufferPointer) -> Void)?
     ) throws -> Data {
         let entry = located.entry
         let bytes: Data
         if entry.isCompressed {
             didInflate?(entry)
-            // Inflated in place, out of the (usually mapped) archive: the
+            // Inflated in place, out of the archive's own bytes — mapped or
+            // already in memory, whichever the caller handed over: the
             // compressed payload is never copied, so its size costs reading
             // time rather than heap — and `maximumCompressedEntrySize` and
             // `maximumCompressedTotalSize` bound the time.
             let inflated = data.withUnsafeBytes { archive in
-                Deflate.decompress(
-                    UnsafeRawBufferPointer(rebasing: archive[located.payload]), count: entry.uncompressedSize
-                )
+                let payload = UnsafeRawBufferPointer(rebasing: archive[located.payload])
+                inflatingFrom?(payload)
+                return Deflate.decompress(payload, count: entry.uncompressedSize)
             }
             guard let inflated else {
                 throw RMDocError.malformedArchive("deflated entry does not inflate: \(entry.name)")
@@ -131,6 +138,11 @@ enum ZipReader {
         guard directoryEnd <= end else {
             throw RMDocError.malformedArchive("central directory outside the file")
         }
+        // After the structural check, so a size that lies is named as a lie;
+        // before the walk, so a directory too large to list costs nothing.
+        guard directorySize <= limits.maximumDirectorySize else {
+            throw RMDocReadError.directoryTooLarge(size: directorySize, limit: limits.maximumDirectorySize)
+        }
 
         var records: [Record] = []
         records.reserveCapacity(entryCount)
@@ -138,7 +150,8 @@ enum ZipReader {
         var cursor = directoryOffset
         for _ in 0 ..< entryCount {
             let record = try record(
-                at: cursor, in: bytes, directoryOffset: directoryOffset, directoryEnd: directoryEnd
+                at: cursor, in: bytes, directoryOffset: directoryOffset, directoryEnd: directoryEnd,
+                maximumNameLength: limits.maximumNameLength
             )
             let name = record.located.entry.name
             guard names.insert(name).inserted else {

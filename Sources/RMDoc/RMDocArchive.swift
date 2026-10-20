@@ -66,9 +66,15 @@ public struct RMDocArchive: Sendable, Equatable {
     /// name, a name used twice, a payload outside the file, a local header
     /// that disagrees with the directory, entries that share bytes, a claim
     /// deflate could not keep — so what is listed is what a read would
-    /// attempt. Of `limits`, only `maximumEntryCount` applies: the sizes are
-    /// what a caller lists in order to weigh them, and are weighed when the
-    /// entries are read.
+    /// attempt. Of `limits`, only the directory's own apply —
+    /// `maximumEntryCount`, `maximumDirectorySize` and `maximumNameLength`,
+    /// which bound what listing costs: the sizes are what a caller lists in
+    /// order to weigh them, and are weighed when the entries are read.
+    ///
+    /// A caller that lists and then reads should hand both the same `Data`
+    /// — `forEachFile(unpacking:limits:where:_:)` takes one — rather than
+    /// open the path twice. For mapped `Data` that is only as good as the
+    /// file staying unchanged in between: a mapping is not a snapshot.
     public static func entries(in data: Data, limits: RMDocReadLimits = .default) throws -> [RMDocEntry] {
         try ZipReader.directory(of: data, limits: limits).map(\.entry)
     }
@@ -127,6 +133,56 @@ public struct RMDocArchive: Sendable, Equatable {
         _ body: (RMDocFile) throws -> Void
     ) throws {
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        try forEachFile(unpacking: data, limits: limits, where: include, body)
+    }
+
+    /// Every file in turn, out of bytes the caller already holds. Under
+    /// `RMDocReadLimits.default`.
+    ///
+    /// The same read as from a URL, over the caller's `Data` rather than a
+    /// mapping this package makes: a host that has mapped the file once and
+    /// listed it with `entries(in:limits:)` reads through that same mapping
+    /// — no second open for another file to be swapped in behind the path.
+    /// A mapping is not a snapshot, though: if the file itself is modified
+    /// in place while it is listed or read, the bytes change underneath.
+    /// The caller must keep the file unchanged for the duration, or read
+    /// from a copy when it needs a guaranteed snapshot. (A file truncated
+    /// under a mapping is worse than changed: touching the lost pages
+    /// faults.) A deflated payload is inflated in place,
+    /// out of `data`, exactly as it is out of a mapping; a stored one is
+    /// copied out as the file it is.
+    ///
+    /// Disfavoured, as are the other two `Data` overloads, so that an
+    /// unapplied reference such as `RMDocArchive.forEachFile(unpacking:_:)`,
+    /// which named the `URL` overload alone in 0.11.0, still does. A call
+    /// with `Data` reaches this one regardless: the `URL` overload does not
+    /// take it.
+    @_disfavoredOverload
+    public static func forEachFile(unpacking data: Data, _ body: (RMDocFile) throws -> Void) throws {
+        try forEachFile(unpacking: data, limits: .default, where: { _ in true }, body)
+    }
+
+    /// Every file in turn, out of bytes the caller already holds, under the
+    /// caller's limits.
+    @_disfavoredOverload
+    public static func forEachFile(
+        unpacking data: Data,
+        limits: RMDocReadLimits,
+        _ body: (RMDocFile) throws -> Void
+    ) throws {
+        try forEachFile(unpacking: data, limits: limits, where: { _ in true }, body)
+    }
+
+    /// The files a caller chooses, out of bytes it already holds — chosen,
+    /// weighed and refused exactly as `forEachFile(unpacking:limits:where:_:)`
+    /// from a URL does, because that one maps the file and comes here.
+    @_disfavoredOverload
+    public static func forEachFile(
+        unpacking data: Data,
+        limits: RMDocReadLimits = .default,
+        where include: (RMDocEntry) throws -> Bool,
+        _ body: (RMDocFile) throws -> Void
+    ) throws {
         try ZipReader.forEachEntry(in: data, limits: limits, where: include) { entry in
             try body(RMDocFile(name: entry.name, data: entry.data))
         }

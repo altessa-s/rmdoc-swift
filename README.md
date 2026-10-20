@@ -100,13 +100,26 @@ entry's declared size and the total a read may declare, each entry's
 compressed size and the compressed total, and the ratio of declared to
 compressed size. They are weighed over every entry a read will inflate, all
 together and before the first of them is — so a refusal costs a walk of the
-directory, never half a pass. The entry count is the exception: it bounds
-the directory walk itself, so it counts the whole archive, whatever a read
-goes on to choose. The size ceilings default to the format's own (65 535
-entries, four gigabytes an entry), because what is too much is the host's to
+directory, never half a pass. The directory's own limits are the exception:
+the entry count, the directory's size as the end record declares it, and the
+length of each name bound the directory walk itself, so they hold over the
+whole archive, whatever a read goes on to choose, and over a listing too. The
+directory's size is weighed before the first record is read and each name's
+length before the name is decoded, so a directory of a few thousand
+65 535-byte names costs nothing to refuse. The size ceilings default to the
+format's own (65 535 entries, four gigabytes an entry, a directory as large
+as the file, 65 535-byte names), because what is too much is the host's to
 say; the ratio ceiling defaults to 200:1 for entries over a megabyte, because
 nothing a tablet exports comes near it and a deflate bomb always does.
 `RMDocReadLimits.format` restores deflate's physical 1032:1 for every entry.
+
+For somebody else's file, set the directory's two limits: 16 MiB of
+directory is 256 bytes a record at the format's 65 535 entries, and a
+tablet's names are UUID paths under a hundred bytes — the full 65 535 entries
+at such names list in under 9 MiB — and 1 024-byte names are `PATH_MAX` on
+the platforms this package runs on, past which a name cannot be unpacked
+anyway. A host on a tighter budget can go lower; 4 MiB still holds some
+30 000 tablet-shaped entries.
 
 **Inflation never runs ahead of the stream.** A deflated payload is inflated
 in place, out of the (mapped) archive's own bytes, and never copied; the
@@ -136,16 +149,22 @@ so each implementation lives beside its own format.
 | `RMDocArchive` | The container in memory: files in packing order. `init(files:)` starts an export, `init(unpacking:)` reads an import, `packed()` is the bytes to write as `<name>.rmdoc`, `documentIDs` the documents inside in order of first appearance — a folder sent whole arrives as several. |
 | `RMDocWriter` | The container onto disk as it is gathered: entries as bytes or streamed files, stored or deflated — per entry too, for an EPUB's `mimetype` that must be stored whatever the rest does — headers patched once a payload's checksum is known. Its `.package` layout takes any relative name a zip specification lays out — nested, dotted — with the zip-slip guard alone, for the EPUB and Word writers that borrow it. |
 | `RMDocEntry` | One entry as the central directory describes it — name, method, compressed and declared size, checksum — before anything is inflated. What a selective read chooses by. |
-| `RMDocReadLimits` | What one read may take: entry count, each entry's declared and compressed size, the read's declared and compressed totals, the compression ratio past a threshold. `.default` and `.format` are the two presets. |
+| `RMDocReadLimits` | What one read may take: entry count, the central directory's size, each name's length, each entry's declared and compressed size, the read's declared and compressed totals, the compression ratio past a threshold. `.default` and `.format` are the two presets. |
 | `RMDocError` | One vocabulary for both directions, and the cases name the file at fault. |
-| `RMDocReadError` | What a read declines for what it asks rather than for lying: a limit exceeded, ZIP64, an encrypted entry, a spanned archive. Apart from `RMDocError` so that adding it broke no consumer's exhaustive `switch`, and not frozen. Give every `switch` over it an `@unknown default`: against the binary framework a later case then reaches that branch instead of breaking the client, but a source build without library evolution accepts an exhaustive `switch` without one — which stops compiling when a case is added. |
+| `RMDocReadError` | What a read declines for what it asks rather than for lying: a limit exceeded (`directoryTooLarge` and `nameTooLong` since 0.11.1), ZIP64, an encrypted entry, a spanned archive. Apart from `RMDocError` so that adding it broke no consumer's exhaustive `switch`, and not frozen. Give every `switch` over it an `@unknown default`: against the binary framework a later case then reaches that branch instead of breaking the client, but a source build without library evolution accepts an exhaustive `switch` without one — which stops compiling when a case is added. |
 
 Reading has the same two shapes as writing: `RMDocArchive(unpacking:)` for a
 container small enough to hold, `RMDocArchive.forEachFile(unpacking:)` for one
 that is not — it maps the file and hands over each entry as it is verified,
 so the peak is one payload rather than all of them. Both take
 `limits:`, and `forEachFile` takes `where:` to choose entries from the
-directory before any is inflated.
+directory before any is inflated. Both read from a `URL` or from `Data` the
+caller already holds — a mapping it made itself, say — and from `Data` a
+deflated payload is inflated in place, exactly as from a mapping this package
+makes: a host can list, vet and read through one mapping, with no second
+open of the path between them. A mapping is not a snapshot: the file must stay
+unchanged while it is listed and read, and a host that cannot promise that
+reads from a copy.
 
 ## Using this package
 
@@ -199,12 +218,20 @@ try RMDocArchive.forEachFile(unpacking: url) { file in
     try file.data.write(to: destination.appending(path: file.name))
 }
 
-// Somebody else's file, in a process with a budget: list the directory,
-// choose, and read only what was chosen — under the host's own limits.
-let limits = RMDocReadLimits(maximumEntrySize: 256 << 20, maximumTotalSize: 512 << 20)
-let id = try RMDocArchive.entries(in: url).first { $0.name.hasSuffix(".content") }?.documentID
+// Somebody else's file, in a process with a budget: map it once, list the
+// directory, choose, and read only what was chosen — through the same
+// mapping, under the host's own limits. (The file must not change meanwhile:
+// a mapping is not a snapshot.)
+let limits = RMDocReadLimits(
+    maximumEntrySize: 256 << 20,
+    maximumTotalSize: 512 << 20,
+    maximumDirectorySize: 4 << 20,
+    maximumNameLength: 1024
+)
+let data = try Data(contentsOf: url, options: .alwaysMapped)
+let id = try RMDocArchive.entries(in: data, limits: limits).first { $0.name.hasSuffix(".content") }?.documentID
 try RMDocArchive.forEachFile(
-    unpacking: url,
+    unpacking: data,
     limits: limits,
     where: { $0.documentID == id && !$0.name.hasSuffix(".epub") },
     { file in keep(file) }
