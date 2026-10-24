@@ -175,7 +175,7 @@ reads from a copy.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/altessa-s/rmdoc-swift.git", from: "0.12.0"),
+    .package(url: "https://github.com/altessa-s/rmdoc-swift.git", from: "0.12.1"),
     // or, beside a checkout: .package(path: "../rmdoc-swift")
 ],
 targets: [
