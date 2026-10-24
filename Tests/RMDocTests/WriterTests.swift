@@ -83,7 +83,7 @@ struct WriterTests {
         #expect(throws: RMDocError.invalidName("../evil")) {
             try writer.add(
                 name: "../evil",
-                contentsOf: URL(fileURLWithPath: "/nonexistent-\(UUID().uuidString)")
+                contentsOf: FileManager.default.temporaryDirectory.appending(path: "nonexistent-\(UUID().uuidString)")
             )
         }
     }

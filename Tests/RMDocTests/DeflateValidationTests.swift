@@ -40,3 +40,19 @@ func rejectsTruncatedInflation() {
         _ = try RMDocArchive(unpacking: bytes)
     }
 }
+
+@Test("The compiled deflate codec requires an exact length and no trailing input")
+func compiledDeflateContract() throws {
+    let payload = Data((0..<(Deflate.initialCapacity * 3 + 17)).map { UInt8(truncatingIfNeeded: $0) })
+    let compressed = Deflate.compress(payload)
+    try #require(compressed.count < payload.count)
+    #expect(Deflate.decompress(compressed, count: payload.count) == payload)
+    #expect(Deflate.decompress(compressed, count: payload.count + 1) == nil)
+    #expect(Deflate.decompress(compressed, count: payload.count - 1) == nil)
+    // Exceed Compression's read-ahead so trailing input remains visible to either codec.
+    #expect(Deflate.decompress(compressed + Data(repeating: 0xa5, count: 64 * 1024), count: payload.count) == nil)
+    #if !canImport(Compression)
+    // Compression reads ahead into trailing input; miniz must reject even one extra byte.
+    #expect(Deflate.decompress(compressed + Data([0]), count: payload.count) == nil)
+    #endif
+}
