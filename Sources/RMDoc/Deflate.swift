@@ -2,7 +2,12 @@
 // Use of this source code is governed by an MIT-style license that can be
 // found in the LICENSE file.
 
+// Compression is the system's codec; miniz serves platforms with no system codec to lean on.
+#if canImport(Compression)
 import Compression
+#else
+import CMiniz
+#endif
 import Foundation
 
 /// Raw deflate, the way a zip entry holds it — Apple's `COMPRESSION_ZLIB`
@@ -21,6 +26,7 @@ enum Deflate {
     /// The squeezed bytes, or the input unchanged when squeezing failed —
     /// the caller compares lengths and stores the entry in that case, so a
     /// failure here costs size, never correctness.
+    #if canImport(Compression)
     static func compress(_ data: Data) -> Data {
         guard !data.isEmpty else { return data }
         var output = Data(count: data.count + 256)
@@ -39,6 +45,35 @@ enum Deflate {
         // this package carries is a book-sized PDF.
         return Data(output.prefix(written))
     }
+
+    #else
+    static func compress(_ data: Data) -> Data {
+        guard !data.isEmpty, let inputSize = UInt32(exactly: data.count) else { return data }
+        var stream = mz_stream()
+        guard mz_deflateInit2(
+            &stream, Int32(MZ_DEFAULT_COMPRESSION), MZ_DEFLATED, -MZ_DEFAULT_WINDOW_BITS, 8, Int32(MZ_DEFAULT_STRATEGY)
+        ) == MZ_OK else { return data }
+        defer { mz_deflateEnd(&stream) }
+        // miniz's counters are 32-bit even on hosts whose Data sizes are wider.
+        let bound = mz_deflateBound(&stream, mz_ulong(inputSize))
+        guard let boundSize = Int(exactly: bound), boundSize <= Int(UInt32.max) - 256 else { return data }
+        let capacity = boundSize + 256
+        var output = Data(count: capacity)
+        let written = output.withUnsafeMutableBytes { (destination: UnsafeMutableRawBufferPointer) -> Int in
+            data.withUnsafeBytes { (source: UnsafeRawBufferPointer) -> Int in
+                stream.next_in = source.bindMemory(to: UInt8.self).baseAddress
+                stream.avail_in = inputSize
+                stream.next_out = destination.bindMemory(to: UInt8.self).baseAddress
+                stream.avail_out = UInt32(capacity)
+                guard mz_deflate(&stream, Int32(MZ_FINISH)) == MZ_STREAM_END,
+                      stream.avail_in == 0 else { return 0 }
+                return capacity - Int(stream.avail_out)
+            }
+        }
+        guard written > 0 else { return data }
+        return Data(output.prefix(written))
+    }
+    #endif
 
     /// The entry's bytes back, or `nil` when they do not inflate to exactly
     /// the length the directory promised. `count` is that promise and is
@@ -72,6 +107,7 @@ enum Deflate {
         return buffer.take()
     }
 
+    #if canImport(Compression)
     private static func inflate(_ source: UnsafePointer<UInt8>, count: Int, into buffer: inout Buffer) -> Bool {
         let spare = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
         defer { spare.deallocate() }
@@ -107,6 +143,46 @@ enum Deflate {
             else { return false }
         }
     }
+
+    #else
+    private static func inflate(_ source: UnsafePointer<UInt8>, count: Int, into buffer: inout Buffer) -> Bool {
+        let spare = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
+        defer { spare.deallocate() }
+        var stream = mz_stream()
+        guard mz_inflateInit2(&stream, -MZ_DEFAULT_WINDOW_BITS) == MZ_OK else { return false }
+        defer { mz_inflateEnd(&stream) }
+        var supplied = 0
+        while true {
+            // Feed bounded chunks so a mapped input need not fit a C unsigned int.
+            if stream.avail_in == 0, supplied < count {
+                let size = min(count - supplied, Int(UInt32.max))
+                stream.next_in = source.advanced(by: supplied)
+                stream.avail_in = UInt32(size)
+                supplied += size
+            }
+            guard let window = buffer.window() else { return false }
+            let overrun = window.room == 0
+            stream.next_out = overrun ? spare : (window.base ?? spare)
+            stream.avail_out = overrun ? 1 : UInt32(min(window.room, Int(UInt32.max)))
+            let previousInput = stream.avail_in
+            let previousOutput = stream.avail_out
+            // FINISH assumes one output allocation; NO_FLUSH permits Buffer to grow.
+            let status = mz_inflate(&stream, Int32(MZ_NO_FLUSH))
+            let written = Int(previousOutput - stream.avail_out)
+            if overrun {
+                guard written == 0 else { return false }
+            } else {
+                buffer.produced += written
+            }
+            if status == MZ_STREAM_END {
+                return stream.avail_in == 0 && supplied == count
+            }
+            guard status == MZ_OK,
+                  stream.avail_in < previousInput || written > 0
+            else { return false }
+        }
+    }
+    #endif
 
     /// Memory that grows with the stream: allocated with `malloc` so it can
     /// be grown with `realloc` and handed to `Data` without a copy.

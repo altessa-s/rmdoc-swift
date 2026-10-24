@@ -8,11 +8,8 @@
 # round-trip test in the suite, because a round trip only ever feeds it bytes
 # it wrote itself. Nothing ran them on a push until this.
 #
-# macOS, and not by preference: the package declares `.macOS(.v15)` and
-# `Deflate.swift` imports `Compression`, which is Apple's and exists nowhere
-# else. The Xcode is chosen rather than pinned — `Package.swift` asks for tools
-# 6.3, and a runner image pinned to an older Xcode fails to parse the manifest
-# at all, with an error that reads like a syntax error and is not one.
+# The macOS job selects Xcode because the manifest needs Swift tools 6.3.
+# Linux and Windows install that toolchain explicitly.
 
 name: CI
 
@@ -46,6 +43,26 @@ jobs:
         run: Scripts/ci-select-xcode.sh
       - run: swift build --build-tests
       - run: swift test
+
+  linux:
+    name: Build and test on Linux
+    runs-on: ubuntu-latest
+    # The toolchain comes from the image, not from an installer: setup-swift
+    # answered "Version 6.3 is not available" for every spelling we tried,
+    # while `swift:6.3` is the image the port was verified in.
+    #
+    # Windows is not in the matrix: there is no image to pull and the
+    # installer resolved no toolchain either. It is verified by hand in a
+    # Windows VM and joins the matrix when a working installer is chosen.
+    container: swift:6.3
+    steps:
+      - uses: actions/checkout@v7
+      # A non-root user, because the deflate tests compare against a real
+      # temporary directory and root is never refused a write.
+      - run: |
+          useradd -m builder
+          chown -R builder "$(cd .. && pwd)"
+          su builder -c "cd '$GITHUB_WORKSPACE' && swift build && swift test"
 
   lint:
     name: SwiftLint

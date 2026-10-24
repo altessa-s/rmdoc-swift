@@ -22,7 +22,14 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "CMiniz",
+            path: "Sources/CMiniz",
+            publicHeadersPath: ".",
+            cSettings: [.define("MINIZ_NO_STDIO"), .define("MINIZ_NO_ARCHIVE_APIS"), .define("MINIZ_NO_TIME")]
+        ),
+        .target(
             name: "RMDoc",
+            dependencies: [.target(name: "CMiniz", condition: .when(platforms: [.linux, .windows]))],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

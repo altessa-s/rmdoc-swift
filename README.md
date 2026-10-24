@@ -8,7 +8,7 @@ export and import a document as. Packing and unpacking, nothing else — what
 the files inside *mean* is the caller's business. It is **not sync v3** and
 shares nothing with it: no `docSchema`, no hashes, none of the cloud's code.
 
-A standalone package with no dependencies at all. It began inside the Slate
+A standalone package with no external package dependencies. It began inside the Slate
 Drive application and left it for the same reason the `.rm` parser did: the
 `.rmdoc` container is reMarkable's format, not that application's, and a
 codec other languages and other platforms are meant to reach has no business
@@ -35,8 +35,11 @@ package of its own, below the product: bytes in, bytes out.
 
 ## What it depends on
 
-Nothing. Foundation for `Data` and nothing else — no package of anyone's, not
-even a logger. An archive that will not open says so by throwing
+The package builds on macOS, Linux and Windows with Swift 6.3. It uses
+Foundation and the system `Compression` framework where available. Platforms
+without `Compression` use vendored miniz 3.1.2
+([MIT license](Sources/CMiniz/LICENSE.txt)). No external package dependencies,
+not even a logger. An archive that will not open says so by throwing
 `RMDocError`, and what a host does about that is the host's business.
 
 That is what makes this package testable against bytes and nothing else, and
@@ -172,7 +175,7 @@ reads from a copy.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/altessa-s/rmdoc-swift.git", from: "0.11.1"),
+    .package(url: "https://github.com/altessa-s/rmdoc-swift.git", from: "0.12.0"),
     // or, beside a checkout: .package(path: "../rmdoc-swift")
 ],
 targets: [
@@ -185,10 +188,12 @@ targets: [
 ]
 ```
 
-**As a binary** — what Slate Drive does. `Scripts/build-xcframework.sh`
-produces `RMDoc.xcframework`, and every release attaches one, so the consumer
-names it as a binary target — by path, or by the `url` and `checksum` the
-release notes spell out:
+**As a binary** — what Slate Drive does, and Apple platforms only: an
+`.xcframework` is an Apple bundle, so a Linux or Windows consumer takes the
+source dependency above. `Scripts/build-xcframework.sh` produces
+`RMDoc.xcframework`, and every release attaches one, so the consumer names it
+as a binary target — by path, or by the `url` and `checksum` the release notes
+spell out:
 
 ```swift
 targets: [
