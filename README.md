@@ -175,7 +175,7 @@ reads from a copy.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/altessa-s/rmdoc-swift.git", from: "0.11.1"),
+    .package(url: "https://github.com/altessa-s/rmdoc-swift.git", from: "0.12.0"),
     // or, beside a checkout: .package(path: "../rmdoc-swift")
 ],
 targets: [
@@ -188,10 +188,12 @@ targets: [
 ]
 ```
 
-**As a binary** — what Slate Drive does. `Scripts/build-xcframework.sh`
-produces `RMDoc.xcframework`, and every release attaches one, so the consumer
-names it as a binary target — by path, or by the `url` and `checksum` the
-release notes spell out:
+**As a binary** — what Slate Drive does, and Apple platforms only: an
+`.xcframework` is an Apple bundle, so a Linux or Windows consumer takes the
+source dependency above. `Scripts/build-xcframework.sh` produces
+`RMDoc.xcframework`, and every release attaches one, so the consumer names it
+as a binary target — by path, or by the `url` and `checksum` the release notes
+spell out:
 
 ```swift
 targets: [
