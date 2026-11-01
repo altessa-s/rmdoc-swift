@@ -15,6 +15,12 @@ codec other languages and other platforms are meant to reach has no business
 living inside a macOS product. Slate Drive now links the `RMDoc.xcframework`
 this repository builds.
 
+Part of **[Slate Drive](https://slatedrive.app)**
+([repository](https://github.com/altessa-s/slatedrive)), the macOS app that
+shows a reMarkable library in Finder. Its sibling
+**[rmlines-swift](https://github.com/altessa-s/rmlines-swift)** reads and
+writes the `.rm` pages this container carries.
+
 ## Why it exists
 
 "Send to tablet" and export-with-ink both speak this container: a zip of the
@@ -175,7 +181,7 @@ reads from a copy.
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/altessa-s/rmdoc-swift.git", from: "0.12.1"),
+    .package(url: "https://github.com/altessa-s/rmdoc-swift.git", from: "1.0.0"),
     // or, beside a checkout: .package(path: "../rmdoc-swift")
 ],
 targets: [
@@ -318,6 +324,23 @@ The tag is also the version the framework declares. `project.yml` carries
 ```sh
 RMDOC_VERSION=1.2.0 Scripts/build-xcframework.sh
 ```
+
+## See also
+
+- **[rmlines-swift](https://github.com/altessa-s/rmlines-swift)** — the `.rm`
+  v6 page format the container's pages are written in, read and written.
+- **[rmlines-lib](https://github.com/altessa-s/rmlines-lib)** — the same page
+  format as a portable C23 library.
+- **[Slate Drive](https://slatedrive.app)**
+  ([repository](https://github.com/altessa-s/slatedrive)) — the app these
+  packages are part of.
+
+## Acknowledgements
+
+The `.rmdoc` container is not documented by reMarkable. This package is built
+on openly available information — the public ZIP specification among it —
+and on the research of third-party developers who documented reMarkable's
+file formats.
 
 ## License
 
