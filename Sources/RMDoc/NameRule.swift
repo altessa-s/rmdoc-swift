@@ -17,7 +17,7 @@ enum NameRule {
     static func device(_ name: String) throws {
         try validate(name) { components in
             (1 ... 2).contains(components.count)
-                && components.allSatisfy { !$0.hasPrefix(".") }
+                && components.allSatisfy { $0.first != "." }
         }
     }
 
@@ -26,7 +26,7 @@ enum NameRule {
     /// the zip-slip one: no component may be a parent reference.
     static func package(_ name: String) throws {
         try validate(name) { components in
-            components.allSatisfy { $0 != ".." }
+            components.allSatisfy { !$0.elementsEqual("..".unicodeScalars) }
         }
     }
 
@@ -34,11 +34,12 @@ enum NameRule {
     /// for a root file. One spelling for `RMDocFile` and `RMDocEntry` both,
     /// so a file and the directory entry it came from answer alike.
     static func documentID(of name: String) -> String {
-        if let slash = name.firstIndex(of: "/") {
-            return String(name[..<slash])
+        let scalars = name.unicodeScalars
+        if let slash = scalars.firstIndex(of: "/") {
+            return String(scalars[..<slash])
         }
-        if let dot = name.firstIndex(of: ".") {
-            return String(name[..<dot])
+        if let dot = scalars.firstIndex(of: ".") {
+            return String(scalars[..<dot])
         }
         return name
     }
@@ -57,12 +58,18 @@ enum NameRule {
     /// character. A name off the wire must not be able to leave the
     /// directory it is unpacked into, nor to spell something a filesystem
     /// or a terminal reads as more than a name.
-    private static func validate(_ name: String, _ layout: ([Substring]) -> Bool) throws {
-        let components = name.split(separator: "/", omittingEmptySubsequences: false)
+    ///
+    /// Path syntax is scalar-based: a combining mark after a separator or
+    /// dot must not hide it inside an extended grapheme cluster.
+    private static func validate(
+        _ name: String, _ layout: ([String.UnicodeScalarView.SubSequence]) -> Bool
+    ) throws {
+        let scalars = name.unicodeScalars
+        let components = scalars.split(separator: "/", omittingEmptySubsequences: false)
         guard name.utf8.count <= maximumLength,
               components.allSatisfy({ !$0.isEmpty }),
-              !name.contains("\\"),
-              name.unicodeScalars.allSatisfy(isSafe),
+              !scalars.contains("\\"),
+              scalars.allSatisfy(isSafe),
               layout(components)
         else {
             throw RMDocError.invalidName(name)
