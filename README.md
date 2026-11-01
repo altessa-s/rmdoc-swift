@@ -8,12 +8,9 @@ export and import a document as. Packing and unpacking, nothing else — what
 the files inside *mean* is the caller's business. It is **not sync v3** and
 shares nothing with it: no `docSchema`, no hashes, none of the cloud's code.
 
-A standalone package with no external package dependencies. It began inside the Slate
-Drive application and left it for the same reason the `.rm` parser did: the
-`.rmdoc` container is reMarkable's format, not that application's, and a
-codec other languages and other platforms are meant to reach has no business
-living inside a macOS product. Slate Drive now links the `RMDoc.xcframework`
-this repository builds.
+A standalone package with no external package dependencies. The same
+container is available to C and other languages as
+**[rmdoc-lib](https://github.com/altessa-s/rmdoc-lib)**.
 
 Part of **[Slate Drive](https://slatedrive.app)**
 ([repository](https://github.com/altessa-s/slatedrive)), the macOS app that
@@ -290,7 +287,6 @@ sample can be made.
 
 ```sh
 Scripts/build-xcframework.sh                              # -> build/RMDoc.xcframework
-Scripts/build-xcframework.sh ../some-app/Frameworks       # and install it there too
 ```
 
 `Package.swift` is the real project; `project.yml` beside it declares the same
@@ -331,6 +327,8 @@ RMDOC_VERSION=1.2.0 Scripts/build-xcframework.sh
   v6 page format the container's pages are written in, read and written.
 - **[rmlines-lib](https://github.com/altessa-s/rmlines-lib)** — the same page
   format as a portable C23 library.
+- **[rmdoc-lib](https://github.com/altessa-s/rmdoc-lib)** — the same
+  container as a portable C23 library.
 - **[Slate Drive](https://slatedrive.app)**
   ([repository](https://github.com/altessa-s/slatedrive)) — the app these
   packages are part of.

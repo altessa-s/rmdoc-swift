@@ -65,9 +65,9 @@ struct NameTests {
         }
     }
 
-    // S1: the name field is sixteen bits, and a longer name used to trap on
-    // the conversion rather than be refused by the rule that refuses every
-    // other thing a name may not be.
+    // S1: the name field is sixteen bits; a longer name is refused by the
+    // same rule that refuses every other thing a name may not be, never
+    // trapped on the conversion.
 
     @Test("A name at the sixteen-bit ceiling packs; one byte past it is refused")
     func nameLengthCeilingIsEnforced() throws {

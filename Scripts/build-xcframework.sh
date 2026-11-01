@@ -8,7 +8,7 @@
 # it once per platform, wrap the frameworks.
 #
 #   Scripts/build-xcframework.sh                 # -> build/RMDoc.xcframework
-#   Scripts/build-xcframework.sh ../some-app/Frameworks
+#   Scripts/build-xcframework.sh <directory>
 #                                                # and install it there too
 #
 # The second form is how a consuming application gets a new codec: the path
